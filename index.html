@@ -170,13 +170,24 @@ const title = s => s ? `Group ${s.group}` : '';
 const fmtTime = ms => new Date(ms).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' });
 const norm = s => String(s || '').replace(/[ً-ْـ]/g, '').replace(/[أإآٱ]/g, 'ا').replace(/ى/g, 'ي').replace(/ة/g, 'ه').replace(/\s+/g, ' ').trim().toLowerCase();
 
-async function api(action, data) {
-  const res = await fetch(API_URL, { method: 'POST', body: JSON.stringify(Object.assign({ action }, data || {})) });
-  if (!res.ok) throw new Error('HTTP ' + res.status);
-  return res.json();
+async function api(action, data, timeoutMs) {
+  const ctl = new AbortController();
+  const timer = setTimeout(() => ctl.abort(), timeoutMs || 20000);
+  const sent = Date.now();
+  try {
+    const res = await fetch(API_URL, { method: 'POST', signal: ctl.signal, body: JSON.stringify(Object.assign({ action }, data || {})) });
+    if (!res.ok) throw new Error('HTTP ' + res.status);
+    const out = await res.json();
+    out._mid = (sent + Date.now()) / 2;
+    return out;
+  } finally {
+    clearTimeout(timer);
+  }
 }
 
+let DEVICE = null;   // kept in memory too, so private-mode browsers (no storage) still use one id
 function deviceId() {
+  if (DEVICE) return DEVICE;
   let id = store.get('ais_device');
   if (!id || !/^[a-f0-9]{32}$/.test(id)) {
     const a = new Uint8Array(16);
@@ -185,25 +196,53 @@ function deviceId() {
     id = Array.from(a, b => b.toString(16).padStart(2, '0')).join('');
     store.set('ais_device', id);
   }
-  return id;
+  return (DEVICE = id);
 }
 
-/* Watch GPS for a few seconds and keep the most accurate fix. */
-function getBestPosition(maxWaitMs, goodEnoughM) {
+/* GPS: follow the phone's position and keep the most accurate fix seen so far. */
+function gpsWatch(onUpdate) {
+  const w = { best: null, error: null, waiters: [], id: null };
+  w.notify = () => w.waiters.slice().forEach(f => f());
+  w.stop = () => { if (w.id != null) navigator.geolocation.clearWatch(w.id); w.id = null; };
+  if (!navigator.geolocation) { w.error = { code: 'unsupported' }; return w; }
+  w.id = navigator.geolocation.watchPosition(p => {
+    if (!w.best || p.coords.accuracy <= w.best.coords.accuracy) w.best = p;
+    if (onUpdate) onUpdate(w.best);
+    w.notify();
+  }, err => { if (err.code === 1) { w.error = err; w.notify(); } }, { enableHighAccuracy: true, maximumAge: 0, timeout: 60000 });
+  return w;
+}
+/* Resolves when a fix within goodM arrives, or settleMs after the first fix with the best so far.
+   Waits up to firstMs for the first fix (that includes answering the permission prompt). */
+function bestFix(w, firstMs, settleMs, goodM) {
   return new Promise((resolve, reject) => {
-    if (!navigator.geolocation) return reject({ code: 'unsupported' });
-    let best = null, done = false, watchId = null, timer = null;
-    const finish = err => {
-      if (done) return; done = true;
-      if (watchId != null) navigator.geolocation.clearWatch(watchId);
-      clearTimeout(timer);
-      best ? resolve(best) : reject(err || { code: 3 });
-    };
-    timer = setTimeout(() => finish(), maxWaitMs);
-    watchId = navigator.geolocation.watchPosition(p => {
-      if (!best || p.coords.accuracy < best.coords.accuracy) best = p;
-      if (p.coords.accuracy <= goodEnoughM) finish();
-    }, err => { if (err.code === 1) finish(err); }, { enableHighAccuracy: true, maximumAge: 0, timeout: maxWaitMs });
+    const start = Date.now();
+    let firstAt = w.best ? Date.now() : 0, done = false, timer = null;
+    const finish = (fn, v) => { if (done) return; done = true; clearInterval(timer); w.waiters = w.waiters.filter(f => f !== check); fn(v); };
+    function check() {
+      if (w.error) return finish(reject, w.error);
+      if (w.best && !firstAt) firstAt = Date.now();
+      if (w.best && (w.best.coords.accuracy <= goodM || Date.now() - firstAt >= settleMs)) return finish(resolve, w.best);
+      if (!w.best && Date.now() - start >= firstMs) return finish(reject, { code: 3 });
+    }
+    w.waiters.push(check);
+    timer = setInterval(check, 250);
+    check();
+  });
+}
+/* Resolves with a fix clearly more accurate than acc, or null after ms. */
+function betterFix(w, acc, ms) {
+  return new Promise(resolve => {
+    const start = Date.now();
+    let done = false, timer = null;
+    const finish = v => { if (done) return; done = true; clearInterval(timer); w.waiters = w.waiters.filter(f => f !== check); resolve(v); };
+    function check() {
+      if (w.best && w.best.coords.accuracy <= Math.min(acc * 0.75, acc - 3)) return finish(w.best);
+      if (w.error || Date.now() - start >= ms) return finish(null);
+    }
+    w.waiters.push(check);
+    timer = setInterval(check, 250);
+    check();
   });
 }
 
@@ -225,11 +264,13 @@ async function student() {
   const done = readJSON(store.get('ais_done_' + sid));
   if (done) return showDone(done, true);
   if (!API_URL) return msg('warn', '⟳', 'Scan the code again', 'This link is incomplete. Scan the QR code your instructor is showing.');
-  msg('spin', '', 'Checking you’re next to your instructor…', 'Allow location access when your phone asks. This takes a few seconds.');
+  msg('spin', '', 'Checking you’re next to your instructor…', 'Allow location access when your phone asks.<br><span id="gpsAcc"></span>');
+  const gps = gpsWatch(p => { const el = document.getElementById('gpsAcc'); if (el) el.textContent = `GPS accuracy ±${Math.round(p.coords.accuracy)} m`; });
   let pos;
   try {
-    pos = await getBestPosition(15000, 10);   // wait a little longer for a good fix: the limit is only 5 m
+    pos = await bestFix(gps, 25000, 3000, 10);   // go as soon as the reading is decent; improve later only if needed
   } catch (e) {
+    gps.stop();
     if (e && e.code === 1) {
       return msg('bad', '⌖', 'Location is blocked',
         'Check-in needs your location to confirm you are in the lab.<br><br><b>iPhone:</b> Settings ▸ Privacy ▸ Location Services ▸ Safari Websites ▸ While Using, and turn on Precise Location.<br><b>Android:</b> tap the lock icon by the address ▸ Permissions ▸ Location ▸ Allow, and make sure “Use precise location” is on.',
@@ -239,12 +280,24 @@ async function student() {
     return msg('warn', '⌖', 'Couldn’t get your location', 'Turn on location (GPS) on your phone, then try again.', retryBtn());
   }
   msg('spin', '', 'Opening the list…', '');
+  const open = p => api('sOpen', { token: TOKEN, device: deviceId(), lat: p.coords.latitude, lng: p.coords.longitude, acc: p.coords.accuracy });
   let res;
   try {
-    res = await api('sOpen', { token: TOKEN, device: deviceId(), lat: pos.coords.latitude, lng: pos.coords.longitude, acc: pos.coords.accuracy });
+    res = await open(pos);
+    // Too far or too rough? GPS often sharpens within seconds, so retry quietly with a better reading.
+    const worthRetry = r => !r.ok && (r.code === 'low_accuracy' || (r.code === 'too_far' && r.distance - r.allowed <= Math.max(15, pos.coords.accuracy * 2)));
+    for (let i = 0; i < 3 && worthRetry(res); i++) {
+      msg('spin', '', 'Getting a more precise location…', `GPS accuracy ±${Math.round(pos.coords.accuracy)} m — hold still a moment.`);
+      const better = await betterFix(gps, pos.coords.accuracy, 7000);
+      if (!better) break;
+      pos = better;
+      res = await open(pos);
+    }
   } catch (e) {
+    gps.stop();
     return msg('warn', '↻', 'No connection', 'Couldn’t reach the attendance service. Check your mobile data and try again.', retryBtn());
   }
+  gps.stop();
   if (!res.ok) return studentFail(res);
   S.ticket = res.ticket; S.session = res.session; S.students = res.students;
   S.expiresAt = Date.now() + res.expiresIn * 1000;
@@ -359,7 +412,35 @@ function showDone(rec, again) {
 }
 
 /* ============================== PROJECTOR ============================== */
-const P = { sid: null, lastLink: null, rotateAt: 0, rotateSec: 15, raf: 0, timer: null };
+const P = { sid: null, lastLink: null, rotateAt: 0, rotateSec: 15, raf: 0, timer: null, key: null, offset: 0, token: null, qrT: null };
+
+/* Same code the online service checks: HMAC-SHA256 with the session's QR key, URL-safe base64, 16 chars. */
+async function localToken(sid, key, offset) {
+  const now = Date.now() + offset, w = Math.floor(now / 15000);
+  const enc = new TextEncoder();
+  const k = await crypto.subtle.importKey('raw', enc.encode(key), { name: 'HMAC', hash: 'SHA-256' }, false, ['sign']);
+  const sig = new Uint8Array(await crypto.subtle.sign('HMAC', k, enc.encode('qr.' + sid + '.' + w)));
+  let b = ''; sig.forEach(x => b += String.fromCharCode(x));
+  const b64 = btoa(b).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
+  return { token: sid + '.' + w + '.' + b64.slice(0, 16), next: (w + 1) * 15000 - now };
+}
+
+async function qrTick() {
+  clearTimeout(P.qrT);
+  let wait = 1000;
+  if (P.key && P.sid && window.crypto && crypto.subtle) {
+    try {
+      const t = await localToken(P.sid, P.key, P.offset);
+      P.token = t.token; P.rotateAt = Date.now() + t.next; wait = Math.min(1000, Math.max(100, t.next + 40));
+    } catch (e) { /* fall back to the server's token */ }
+  }
+  const el = document.getElementById('qr');
+  if (el && P.token && window.qrcode) {
+    const link = studentLink(P.token);
+    if (link !== P.lastLink) { el.innerHTML = qrSvg(link); P.lastLink = link; }
+  }
+  P.qrT = setTimeout(qrTick, wait);
+}
 
 function loadQrLib() {
   return new Promise(resolve => {
@@ -390,27 +471,30 @@ async function projector() {
 
 async function poll() {
   let r = null;
-  try { r = await api('pScreen', { key: SCREEN }); } catch (e) { r = null; }
+  try { r = await api('pScreen', { key: SCREEN }, 12000); } catch (e) { r = null; }
   if (!r) {
     if (!P.sid) app.innerHTML = `<div class="closed"><div><div class="icon warn">↻</div><h1>Can’t reach the attendance service</h1><p class="muted">Check this computer’s internet. Retrying…</p></div></div>`;
   } else if (!r.ok) {
+    clearTimeout(P.qrT);
     app.innerHTML = `<div class="closed"><div><div class="icon bad">!</div><h1>${esc(r.message)}</h1><p class="muted">Open the projector link again from the app.</p></div></div>`;
     return;
   } else if (!r.session) {
-    P.sid = null;
+    P.sid = null; clearTimeout(P.qrT);
     app.innerHTML = `<div class="closed"><div><div class="icon info">✓</div><h1>Attendance is closed</h1></div></div>`;
     return;
   } else {
     render(r);
   }
-  const until = P.rotateAt - Date.now() + 500;
   clearTimeout(P.timer);
-  P.timer = setTimeout(poll, Math.max(1000, Math.min(4000, until > 0 ? until : 4000)));
+  P.timer = setTimeout(poll, P.key ? 4000 : Math.max(1000, Math.min(4000, P.rotateAt - Date.now() + 500)));
 }
 
 function render(r) {
   const s = r.session;
-  P.rotateSec = r.rotateSeconds; P.rotateAt = Date.now() + r.nextRotateIn * 1000;
+  P.rotateSec = r.rotateSeconds;
+  P.key = r.qrKey || null;
+  if (r.serverTime) { const d = r.serverTime - r._mid; P.offset = Math.abs(d) >= 10000 ? d : 0; }   // only fix clearly wrong clocks
+  if (!P.key) { P.token = r.token; P.rotateAt = Date.now() + r.nextRotateIn * 1000; }
   if (P.sid !== s.id) {
     P.sid = s.id; P.lastLink = null;
     app.innerHTML = `<div class="ptop"><div class="ptitle">Week ${esc(s.week)} · ${esc(title(s))}</div>
@@ -420,9 +504,8 @@ function render(r) {
     document.getElementById('fs').onclick = () => document.fullscreenElement ? document.exitFullscreen() : document.documentElement.requestFullscreen && document.documentElement.requestFullscreen();
     animate();
   }
-  const link = studentLink(r.token);
-  if (link !== P.lastLink && window.qrcode) { document.getElementById('qr').innerHTML = qrSvg(link); P.lastLink = link; }
   document.getElementById('count').innerHTML = `${r.count}<small> / ${r.total} present</small>`;
+  qrTick();
 }
 
 function animate() {
