@@ -1,0 +1,444 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<title>AIS Lab Attendance</title>
+<meta name="theme-color" content="#0f3d3a">
+<meta name="robots" content="noindex">
+<style>
+:root{
+  --bg:#f3f5f2; --card:#ffffff; --ink:#132321; --muted:#5b6b67; --line:#dfe5e1; --soft:#eef2ef;
+  --accent:#0f5e57; --accent-ink:#ffffff; --accent-soft:#e2f0ec;
+  --ok:#11784a; --ok-bg:#e1f3e8; --warn:#8a5300; --warn-bg:#fcefd8; --bad:#b42318; --bad-bg:#fce7e4;
+  --shadow:0 1px 2px rgba(16,32,30,.06),0 8px 24px rgba(16,32,30,.06);
+  --r:16px;
+}
+@media (prefers-color-scheme: dark){
+  :root{
+    --bg:#0d1514; --card:#15201e; --ink:#e6eeeb; --muted:#93a39f; --line:#26342f; --soft:#1b2826;
+    --accent:#4fc1ad; --accent-ink:#06211d; --accent-soft:#173430;
+    --ok:#5fd394; --ok-bg:#143225; --warn:#f2b25b; --warn-bg:#33270f; --bad:#ff8a7a; --bad-bg:#3a1a16;
+    --shadow:0 1px 2px rgba(0,0,0,.3),0 8px 24px rgba(0,0,0,.25);
+  }
+}
+*{box-sizing:border-box}
+html,body{margin:0}
+body{background:var(--bg);color:var(--ink);font:16px/1.45 system-ui,-apple-system,"Segoe UI",Roboto,"Noto Sans Arabic",Tahoma,sans-serif;-webkit-text-size-adjust:100%;min-height:100vh;-webkit-tap-highlight-color:transparent}
+button,input,select{font:inherit;color:inherit}
+a{color:var(--accent)}
+.wrap{max-width:560px;margin:0 auto;padding:16px 16px 40px}
+.brand{display:flex;align-items:center;gap:10px;font-weight:650;letter-spacing:.01em;margin:4px 0 16px}
+.brand .mark{width:30px;height:30px;border-radius:9px;background:var(--accent);color:var(--accent-ink);display:grid;place-items:center;font-size:12px;font-weight:800}
+.brand small{display:block;font-weight:500;color:var(--muted);font-size:13px;margin-top:-2px}
+.card{background:var(--card);border:1px solid var(--line);border-radius:var(--r);box-shadow:var(--shadow);padding:18px}
+.card + .card{margin-top:12px}
+.center{text-align:center}
+h1{font-size:22px;line-height:1.25;margin:0 0 6px}
+h2{font-size:17px;margin:0 0 10px}
+p{margin:0 0 12px}
+.muted{color:var(--muted)}
+.small{font-size:13px}
+.btn{display:inline-flex;align-items:center;justify-content:center;gap:8px;border:0;border-radius:12px;padding:13px 18px;font-weight:650;cursor:pointer;background:var(--accent);color:var(--accent-ink);min-height:48px;text-decoration:none}
+.btn:disabled{opacity:.45;cursor:not-allowed}
+.btn.block{width:100%}
+.btn.ghost{background:var(--soft);color:var(--ink)}
+.btn.danger{background:var(--bad-bg);color:var(--bad)}
+.btn.sm{min-height:38px;padding:8px 13px;font-size:14px;border-radius:10px}
+.icon{width:64px;height:64px;border-radius:50%;display:grid;place-items:center;margin:4px auto 14px;font-size:30px;font-weight:700}
+.icon.ok{background:var(--ok-bg);color:var(--ok)}
+.icon.warn{background:var(--warn-bg);color:var(--warn)}
+.icon.bad{background:var(--bad-bg);color:var(--bad)}
+.icon.info{background:var(--accent-soft);color:var(--accent)}
+.spinner{width:40px;height:40px;border-radius:50%;border:4px solid var(--soft);border-top-color:var(--accent);animation:spin .9s linear infinite;margin:8px auto 16px}
+@keyframes spin{to{transform:rotate(360deg)}}
+.chips{display:flex;flex-wrap:wrap;gap:6px;margin-bottom:12px}
+.chip{background:var(--soft);border-radius:999px;padding:4px 10px;font-size:13px;font-weight:600}
+.chip.accent{background:var(--accent-soft);color:var(--accent)}
+.row{display:flex;align-items:center;justify-content:space-between;gap:10px}
+.search,.field{width:100%;border:1px solid var(--line);background:var(--bg);border-radius:12px;padding:12px 14px}
+.search{margin:4px 0 10px}
+.search:focus,.field:focus{outline:2px solid var(--accent);outline-offset:1px}
+.list{display:flex;flex-direction:column;gap:6px}
+.name{display:flex;align-items:center;justify-content:space-between;gap:10px;width:100%;text-align:right;direction:rtl;border:1px solid var(--line);background:var(--card);border-radius:12px;padding:12px 14px;cursor:pointer;min-height:52px}
+.name:hover{border-color:var(--accent)}
+.name .nm{font-weight:600;font-size:16px}
+.name .cd{direction:ltr;color:var(--muted);font-size:13px;font-variant-numeric:tabular-nums}
+.name[disabled]{cursor:default;opacity:.55;background:var(--soft)}
+.name[disabled] .cd::before{content:"✓ checked in · ";color:var(--ok)}
+.empty{padding:18px;text-align:center;color:var(--muted)}
+.timer{font-variant-numeric:tabular-nums;font-weight:700;font-size:14px;color:var(--muted)}
+.timer.low{color:var(--bad)}
+.sheet{position:fixed;inset:0;background:rgba(5,15,13,.5);display:flex;align-items:flex-end;justify-content:center;z-index:20;padding:12px}
+.sheet .card{width:100%;max-width:520px;margin-bottom:max(8px,env(safe-area-inset-bottom))}
+.bigname{direction:rtl;font-size:22px;font-weight:700;margin:6px 0 4px;line-height:1.35}
+.btns{display:flex;gap:10px;margin-top:16px}
+.btns .btn{flex:1}
+.note{background:var(--warn-bg);color:var(--warn);border-radius:12px;padding:10px 12px;font-size:14px;margin-top:12px}
+.err{background:var(--bad-bg);color:var(--bad);border-radius:12px;padding:10px 12px;font-size:14px;margin-top:12px}
+.okmsg{background:var(--ok-bg);color:var(--ok);border-radius:12px;padding:10px 12px;font-size:14px;margin-top:12px}
+label.lbl{display:block;font-size:12px;font-weight:700;color:var(--muted);margin:16px 0 6px;text-transform:uppercase;letter-spacing:.05em}
+.seg{display:flex;gap:6px;flex-wrap:wrap}
+.seg button{flex:1;min-width:0;border:1px solid var(--line);background:var(--bg);border-radius:12px;padding:10px 8px;cursor:pointer;font-weight:600;line-height:1.2}
+.seg button small{display:block;font-weight:500;color:var(--muted);font-size:12px;margin-top:2px}
+.seg button[aria-pressed="true"]{background:var(--accent);border-color:var(--accent);color:var(--accent-ink)}
+.seg button[aria-pressed="true"] small{color:inherit;opacity:.85}
+.netline{display:flex;gap:12px;align-items:center;border:1px dashed var(--line);border-radius:12px;padding:12px}
+.dot{width:10px;height:10px;border-radius:50%;background:var(--bad);flex:none}
+.dot.on{background:var(--ok)}
+details.more{border:1px solid var(--line);border-radius:12px;padding:0 12px;margin-top:12px}
+details.more summary{cursor:pointer;padding:12px 0;font-weight:600;list-style:none}
+details.more summary::-webkit-details-marker{display:none}
+details.more summary::after{content:"▾";float:right;color:var(--muted)}
+details.more[open]{padding-bottom:12px}
+.tabs{display:flex;background:var(--soft);border-radius:12px;padding:4px;gap:4px;margin-bottom:14px}
+.tabs button{flex:1;border:0;background:transparent;border-radius:9px;padding:9px;font-weight:650;cursor:pointer;color:var(--muted)}
+.tabs button[aria-pressed="true"]{background:var(--card);color:var(--ink);box-shadow:var(--shadow)}
+.qrcard{background:#fff;color:#111;border-radius:20px;padding:16px;display:flex;flex-direction:column;align-items:center;border:1px solid var(--line);box-shadow:var(--shadow)}
+.qr{width:100%;max-width:420px;aspect-ratio:1}
+.qr svg{width:100%;height:100%;display:block}
+.bar{width:100%;max-width:420px;height:6px;background:#e7ece9;border-radius:6px;overflow:hidden;margin-top:12px}
+.bar i{display:block;height:100%;background:#0f5e57;width:100%}
+.scan{font-size:20px;font-weight:750;margin-top:10px;color:#0f3d3a;text-align:center}
+.scan small{display:block;font-size:13px;font-weight:500;color:#5b6b67}
+.count{font-size:40px;font-weight:800;line-height:1;font-variant-numeric:tabular-nums}
+.count small{font-size:17px;color:var(--muted);font-weight:600}
+.roll{display:flex;flex-direction:column;gap:2px;margin-top:8px}
+.roll button{display:flex;align-items:center;gap:10px;direction:rtl;text-align:right;border:0;background:transparent;border-radius:10px;padding:8px;cursor:pointer;width:100%}
+.roll button:active{background:var(--soft)}
+.tick{width:24px;height:24px;border-radius:50%;border:2px solid var(--line);flex:none;display:grid;place-items:center;font-size:13px;font-weight:800}
+.roll .in .tick{background:var(--ok);border-color:var(--ok);color:#fff}
+.roll .nm{flex:1;font-size:15px}
+.roll .out .nm{color:var(--muted)}
+.mono{font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;font-size:13px;word-break:break-all}
+.toast{position:fixed;left:50%;bottom:calc(20px + env(safe-area-inset-bottom));transform:translateX(-50%);background:var(--ink);color:var(--bg);padding:10px 16px;border-radius:12px;font-size:14px;z-index:30;max-width:90vw;box-shadow:var(--shadow)}
+.tablewrap{overflow:auto;border:1px solid var(--line);border-radius:12px;margin-top:12px;max-height:70vh}
+table.grid{border-collapse:separate;border-spacing:0;font-size:13px;min-width:100%}
+table.grid th,table.grid td{border-bottom:1px solid var(--line);padding:0;text-align:center;white-space:nowrap}
+table.grid thead th{position:sticky;top:0;background:var(--soft);z-index:2;padding:8px 6px;font-weight:700}
+table.grid th.nm,table.grid td.nm{position:sticky;right:0;background:var(--card);z-index:1;text-align:right;direction:rtl;padding:8px 10px;max-width:180px;overflow:hidden;text-overflow:ellipsis;border-left:1px solid var(--line)}
+table.grid thead th.nm{z-index:3;background:var(--soft)}
+table.grid td button{width:38px;height:36px;border:0;background:transparent;cursor:pointer;font-weight:800;color:var(--ok)}
+table.grid td button.no{color:var(--line)}
+table.grid td.tot{font-weight:800;padding:0 8px}
+table.grid .livecol{background:var(--accent-soft)}
+table.grid tfoot td{background:var(--soft);font-weight:700;padding:8px 4px;position:sticky;bottom:0}
+table.grid tfoot td.nm{background:var(--soft)}
+table.grid tr.labrow td{background:var(--accent-soft);color:var(--accent);font-weight:800;padding:6px 10px;text-align:right}
+table.grid tr.labrow td.nm{background:var(--accent-soft)}
+.roll .small{flex:none}
+.name .cd{white-space:nowrap;text-align:left;line-height:1.35}
+/* projector */
+.proj{min-height:100vh;display:flex;flex-direction:column;padding:20px;gap:16px}
+.ptop{display:flex;align-items:center;justify-content:space-between;gap:12px;flex-wrap:wrap}
+.ptitle{font-size:clamp(20px,2.4vw,32px);font-weight:750}
+.pcount{font-size:clamp(28px,3.6vw,52px);font-weight:800;font-variant-numeric:tabular-nums}
+.pcount small{font-size:.45em;color:var(--muted)}
+.pstage{flex:1;display:flex;align-items:center;justify-content:center}
+.pcard{background:#fff;color:#111;border-radius:22px;padding:22px;display:flex;flex-direction:column;align-items:center;box-shadow:var(--shadow)}
+.pcard .qr{width:min(66vh,80vw);max-width:none}
+.pcard .bar{max-width:none;width:100%}
+.step{font-size:clamp(16px,1.8vw,24px);font-weight:750;color:#0f3d3a;margin-top:12px;text-align:center}
+.step small{display:block;font-size:.65em;font-weight:500;color:#5b6b67;margin-top:4px}
+.closed{flex:1;display:grid;place-items:center;text-align:center}
+</style>
+</head>
+<body>
+<div id="app"></div>
+<script>
+/* AIS Lab Attendance — student check-in page (and projector view).
+   Host this file anywhere with https (e.g. GitHub Pages). It needs no editing:
+   the link in the QR code tells it which online service to use. */
+const QR_LIB = 'https://cdn.jsdelivr.net/npm/qrcode-generator@1.4.4/qrcode.js';
+const app = document.getElementById('app');
+const params = new URLSearchParams(location.search);
+const clean = v => String(v || '').replace(/[^A-Za-z0-9._-]/g, '');
+const SID = clean(params.get('s')).replace(/\./g, '');
+const LOCAL = /^(localhost|127\.0\.0\.1)$/.test(location.hostname);
+const API_URL = (LOCAL && params.get('api')) || (SID ? `https://script.google.com/macros/s/${SID}/exec` : '');
+const TOKEN = clean(params.get('t'));
+const SCREEN = clean(params.get('screen'));
+const MODE = SCREEN ? 'screen' : TOKEN ? 'student' : 'home';
+
+const esc = s => String(s == null ? '' : s).replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+const store = {
+  get(k) { try { return localStorage.getItem(k); } catch (e) { return null; } },
+  set(k, v) { try { localStorage.setItem(k, v); } catch (e) {} },
+};
+const readJSON = s => { try { return s ? JSON.parse(s) : null; } catch (e) { return null; } };
+const title = s => s ? `Group ${s.group}` : '';
+const fmtTime = ms => new Date(ms).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' });
+const norm = s => String(s || '').replace(/[ً-ْـ]/g, '').replace(/[أإآٱ]/g, 'ا').replace(/ى/g, 'ي').replace(/ة/g, 'ه').replace(/\s+/g, ' ').trim().toLowerCase();
+
+async function api(action, data) {
+  const res = await fetch(API_URL, { method: 'POST', body: JSON.stringify(Object.assign({ action }, data || {})) });
+  if (!res.ok) throw new Error('HTTP ' + res.status);
+  return res.json();
+}
+
+function deviceId() {
+  let id = store.get('ais_device');
+  if (!id || !/^[a-f0-9]{32}$/.test(id)) {
+    const a = new Uint8Array(16);
+    if (window.crypto && crypto.getRandomValues) crypto.getRandomValues(a);
+    else for (let i = 0; i < 16; i++) a[i] = Math.floor(Math.random() * 256);
+    id = Array.from(a, b => b.toString(16).padStart(2, '0')).join('');
+    store.set('ais_device', id);
+  }
+  return id;
+}
+
+/* Watch GPS for a few seconds and keep the most accurate fix. */
+function getBestPosition(maxWaitMs, goodEnoughM) {
+  return new Promise((resolve, reject) => {
+    if (!navigator.geolocation) return reject({ code: 'unsupported' });
+    let best = null, done = false, watchId = null, timer = null;
+    const finish = err => {
+      if (done) return; done = true;
+      if (watchId != null) navigator.geolocation.clearWatch(watchId);
+      clearTimeout(timer);
+      best ? resolve(best) : reject(err || { code: 3 });
+    };
+    timer = setTimeout(() => finish(), maxWaitMs);
+    watchId = navigator.geolocation.watchPosition(p => {
+      if (!best || p.coords.accuracy < best.coords.accuracy) best = p;
+      if (p.coords.accuracy <= goodEnoughM) finish();
+    }, err => { if (err.code === 1) finish(err); }, { enableHighAccuracy: true, maximumAge: 0, timeout: maxWaitMs });
+  });
+}
+
+function screen(html, sub) {
+  app.innerHTML = `<div class="wrap"><div class="brand"><div class="mark">AIS</div><div>AIS Lab Attendance<small>${esc(sub || 'Check in')}</small></div></div>${html}</div>`;
+}
+function msg(kind, icon, head, text, actions) {
+  screen(`<div class="card center" role="status" aria-live="polite">
+    ${kind === 'spin' ? '<div class="spinner"></div>' : `<div class="icon ${kind}">${icon}</div>`}
+    <h1>${esc(head)}</h1>${text ? `<p class="muted">${text}</p>` : ''}${actions || ''}</div>`);
+}
+const retryBtn = () => `<button class="btn block" onclick="location.reload()">Try again</button>`;
+
+/* ============================== STUDENT ============================== */
+const S = { ticket: null, session: null, students: [], expiresAt: 0, timer: null, busy: false };
+
+async function student() {
+  const sid = TOKEN.split('.')[0];
+  const done = readJSON(store.get('ais_done_' + sid));
+  if (done) return showDone(done, true);
+  if (!API_URL) return msg('warn', '⟳', 'Scan the code again', 'This link is incomplete. Scan the QR code your instructor is showing.');
+  msg('spin', '', 'Checking you’re next to your instructor…', 'Allow location access when your phone asks. This takes a few seconds.');
+  let pos;
+  try {
+    pos = await getBestPosition(10000, 15);
+  } catch (e) {
+    if (e && e.code === 1) {
+      return msg('bad', '⌖', 'Location is blocked',
+        'Check-in needs your location to confirm you are in the lab.<br><br><b>iPhone:</b> Settings ▸ Privacy ▸ Location Services ▸ Safari Websites ▸ While Using, and turn on Precise Location.<br><b>Android:</b> tap the lock icon by the address ▸ Permissions ▸ Location ▸ Allow, and make sure “Use precise location” is on.',
+        retryBtn());
+    }
+    if (e && e.code === 'unsupported') return msg('bad', '⌖', 'Location not available', 'This browser can’t share location. Open the link in Chrome or Safari.');
+    return msg('warn', '⌖', 'Couldn’t get your location', 'Turn on location (GPS) on your phone, then try again.', retryBtn());
+  }
+  msg('spin', '', 'Opening the list…', '');
+  let res;
+  try {
+    res = await api('sOpen', { token: TOKEN, device: deviceId(), lat: pos.coords.latitude, lng: pos.coords.longitude, acc: pos.coords.accuracy });
+  } catch (e) {
+    return msg('warn', '↻', 'No connection', 'Couldn’t reach the attendance service. Check your mobile data and try again.', retryBtn());
+  }
+  if (!res.ok) return studentFail(res);
+  S.ticket = res.ticket; S.session = res.session; S.students = res.students;
+  S.expiresAt = Date.now() + res.expiresIn * 1000;
+  showPicker();
+}
+
+function studentFail(res) {
+  clearInterval(S.timer);
+  switch (res.code) {
+    case 'already': return showDone(saveDone(res.sessionId, res.name, res.session), true);
+    case 'too_far':
+      return msg('bad', '⌖', 'You’re not next to your instructor',
+        `You are about <b>${esc(res.distance)} m</b> away; check-in works within <b>${esc(res.allowed)} m</b>.<br><br>Stand closer to your instructor, wait a few seconds for GPS to settle, and try again.`, retryBtn());
+    case 'low_accuracy': return msg('warn', '⌖', 'Location too rough', esc(res.message), retryBtn());
+    case 'expired': case 'bad_qr': case 'bad_ticket': return msg('warn', '⟳', 'Scan the code again', esc(res.message));
+    case 'ticket_expired': return msg('warn', '⏱', 'Time ran out', esc(res.message));
+    case 'closed': return msg('info', '✕', 'Attendance is closed', esc(res.message));
+    default: return msg('bad', '!', 'Something went wrong', esc(res.message || 'Please try again.'), retryBtn());
+  }
+}
+
+function showPicker() {
+  const s = S.session;
+  screen(`<div class="card">
+      <div class="chips"><span class="chip accent">Week ${esc(s.week)}</span><span class="chip">${esc(title(s))}</span></div>
+      <div class="row"><h1>Choose your name</h1><span class="timer" id="timer"></span></div>
+      <input id="q" class="search" type="search" placeholder="Search your name or code" autocomplete="off" aria-label="Search your name">
+      <div class="list" id="list"></div>
+    </div>`);
+  document.getElementById('q').addEventListener('input', renderList);
+  renderList();
+  clearInterval(S.timer);
+  const tick = () => {
+    const left = Math.max(0, Math.round((S.expiresAt - Date.now()) / 1000));
+    const el = document.getElementById('timer');
+    if (el) { el.textContent = `${Math.floor(left / 60)}:${String(left % 60).padStart(2, '0')} left`; el.classList.toggle('low', left <= 30); }
+    if (left <= 0) studentFail({ code: 'ticket_expired', message: 'Time ran out. Scan the QR code on the screen again.' });
+  };
+  tick(); S.timer = setInterval(tick, 1000);
+}
+
+function renderList() {
+  const q = norm((document.getElementById('q') || {}).value);
+  const list = document.getElementById('list');
+  if (!list) return;
+  const items = S.students.filter(st => !q || norm(st.name).includes(q) || st.code.includes(q));
+  list.innerHTML = items.length ? items.map(st => `<button class="name" ${st.present ? 'disabled' : ''} data-code="${esc(st.code)}">
+      <span class="nm">${esc(st.name)}</span><span class="cd">${esc(st.code)}${st.lab ? '<br>Lab ' + esc(st.lab) : ''}</span></button>`).join('')
+    : `<div class="empty">No match. Check the spelling, or tell your instructor if your name is missing.</div>`;
+  list.querySelectorAll('button.name:not([disabled])').forEach(b => b.addEventListener('click', () => confirmName(b.dataset.code)));
+}
+
+function confirmName(code) {
+  const st = S.students.find(x => x.code === code);
+  if (!st) return;
+  const el = document.createElement('div');
+  el.className = 'sheet';
+  el.innerHTML = `<div class="card" role="dialog" aria-modal="true" aria-label="Confirm check-in">
+      <p class="muted small" style="margin:0">Check in as</p>
+      <div class="bigname">${esc(st.name)}</div>
+      <p class="muted small">Code ${esc(st.code)}${st.lab ? ' · Lab ' + esc(st.lab) : ''} · Week ${esc(S.session.week)} · ${esc(title(S.session))}</p>
+      <div class="note">This can’t be changed afterwards. Only choose your own name.</div>
+      <div id="sheetErr"></div>
+      <div class="btns"><button class="btn ghost" id="back">Back</button><button class="btn" id="go">Confirm</button></div>
+    </div>`;
+  document.body.appendChild(el);
+  const close = () => el.remove();
+  el.addEventListener('click', e => { if (e.target === el && !S.busy) close(); });
+  el.querySelector('#back').onclick = () => { if (!S.busy) close(); };
+  el.querySelector('#go').onclick = async () => {
+    if (S.busy) return;
+    S.busy = true;
+    const go = el.querySelector('#go'); go.disabled = true; go.textContent = 'Checking in…';
+    let res;
+    try { res = await api('sCheckIn', { ticket: S.ticket, device: deviceId(), code }); }
+    catch (e) { res = { ok: false, code: 'net' }; }
+    S.busy = false;
+    if (res.ok) { close(); clearInterval(S.timer); return showDone(saveDone(res.sessionId, res.name, res.session), false); }
+    if (res.code === 'taken') { st.present = true; renderList(); close(); return toast(res.message); }
+    if (res.code === 'net') {
+      go.disabled = false; go.textContent = 'Confirm';
+      el.querySelector('#sheetErr').innerHTML = '<div class="err">No connection. Check your mobile data and tap Confirm again.</div>';
+      return;
+    }
+    close(); studentFail(res);
+  };
+}
+
+function toast(text) {
+  const t = document.createElement('div');
+  t.className = 'sheet'; t.style.alignItems = 'flex-start';
+  t.innerHTML = `<div class="card"><div class="err" style="margin:0">${esc(text)}</div><div class="btns"><button class="btn ghost">OK</button></div></div>`;
+  t.querySelector('button').onclick = () => t.remove();
+  document.body.appendChild(t);
+}
+
+function saveDone(sessionId, name, session) {
+  const rec = { name: name || '', at: Date.now(), session: session || null };
+  if (sessionId) store.set('ais_done_' + sessionId, JSON.stringify(rec));
+  return rec;
+}
+
+function showDone(rec, again) {
+  const s = rec.session;
+  screen(`<div class="card center">
+      <div class="icon ok">✓</div>
+      <h1>${again ? 'Already checked in' : 'You’re checked in'}</h1>
+      ${rec.name ? `<div class="bigname">${esc(rec.name)}</div>` : ''}
+      ${s ? `<div class="chips" style="justify-content:center;margin-top:8px"><span class="chip accent">Week ${esc(s.week)}</span><span class="chip">${esc(title(s))}</span></div>` : ''}
+      <p class="muted small">${again ? 'This phone has already been used for this attendance.' : 'Recorded at ' + esc(fmtTime(rec.at)) + '.'} You can close this page.</p>
+    </div>`);
+}
+
+/* ============================== PROJECTOR ============================== */
+const P = { sid: null, lastLink: null, rotateAt: 0, rotateSec: 15, raf: 0, timer: null };
+
+function loadQrLib() {
+  return new Promise(resolve => {
+    if (window.qrcode) return resolve();
+    const s = document.createElement('script'); s.src = QR_LIB; s.onload = resolve; s.onerror = resolve; document.head.appendChild(s);
+  });
+}
+function qrSvg(text) {
+  qrcode.stringToBytes = qrcode.stringToBytesFuncs['UTF-8'];
+  const q = qrcode(0, 'M'); q.addData(text); q.make();
+  const n = q.getModuleCount(), m = 3; let d = '';
+  for (let r = 0; r < n; r++) for (let c = 0; c < n; c++) if (q.isDark(r, c)) d += `M${c + m} ${r + m}h1v1h-1z`;
+  return `<svg viewBox="0 0 ${n + 2 * m} ${n + 2 * m}" shape-rendering="crispEdges"><rect width="100%" height="100%" fill="#fff"/><path d="${d}" fill="#000"/></svg>`;
+}
+function studentLink(token) {
+  const q = new URLSearchParams();
+  if (SID) q.set('s', SID); else if (LOCAL && params.get('api')) q.set('api', params.get('api'));
+  q.set('t', token);
+  return location.origin + location.pathname + '?' + q.toString();
+}
+
+async function projector() {
+  app.className = 'proj';
+  app.innerHTML = `<div class="closed"><div><div class="spinner"></div><p class="muted">Connecting…</p></div></div>`;
+  await loadQrLib();
+  poll();
+}
+
+async function poll() {
+  let r = null;
+  try { r = await api('pScreen', { key: SCREEN }); } catch (e) { r = null; }
+  if (!r) {
+    if (!P.sid) app.innerHTML = `<div class="closed"><div><div class="icon warn">↻</div><h1>Can’t reach the attendance service</h1><p class="muted">Check this computer’s internet. Retrying…</p></div></div>`;
+  } else if (!r.ok) {
+    app.innerHTML = `<div class="closed"><div><div class="icon bad">!</div><h1>${esc(r.message)}</h1><p class="muted">Open the projector link again from the app.</p></div></div>`;
+    return;
+  } else if (!r.session) {
+    P.sid = null;
+    app.innerHTML = `<div class="closed"><div><div class="icon info">✓</div><h1>Attendance is closed</h1></div></div>`;
+    return;
+  } else {
+    render(r);
+  }
+  const until = P.rotateAt - Date.now() + 500;
+  clearTimeout(P.timer);
+  P.timer = setTimeout(poll, Math.max(1000, Math.min(4000, until > 0 ? until : 4000)));
+}
+
+function render(r) {
+  const s = r.session;
+  P.rotateSec = r.rotateSeconds; P.rotateAt = Date.now() + r.nextRotateIn * 1000;
+  if (P.sid !== s.id) {
+    P.sid = s.id; P.lastLink = null;
+    app.innerHTML = `<div class="ptop"><div class="ptitle">Week ${esc(s.week)} · ${esc(title(s))}</div>
+        <div class="row"><div class="pcount" id="count"></div><button class="btn ghost sm" id="fs">Full screen</button></div></div>
+      <div class="pstage"><div class="pcard"><div class="qr" id="qr"></div><div class="bar"><i id="fill"></i></div>
+        <div class="step">Scan to check in<small>Stand near your instructor · the code changes every ${esc(r.rotateSeconds)} seconds</small></div></div></div>`;
+    document.getElementById('fs').onclick = () => document.fullscreenElement ? document.exitFullscreen() : document.documentElement.requestFullscreen && document.documentElement.requestFullscreen();
+    animate();
+  }
+  const link = studentLink(r.token);
+  if (link !== P.lastLink && window.qrcode) { document.getElementById('qr').innerHTML = qrSvg(link); P.lastLink = link; }
+  document.getElementById('count').innerHTML = `${r.count}<small> / ${r.total} present</small>`;
+}
+
+function animate() {
+  cancelAnimationFrame(P.raf);
+  const step = () => {
+    const f = document.getElementById('fill');
+    if (!f) return;
+    f.style.width = Math.min(100, Math.max(0, P.rotateAt - Date.now()) / (P.rotateSec * 10)) + '%';
+    P.raf = requestAnimationFrame(step);
+  };
+  step();
+}
+
+if (MODE === 'student') student();
+else if (MODE === 'screen') projector();
+else msg('info', '▦', 'Scan the QR code in your lab', 'Point your phone camera at the code your instructor is showing.');
+</script>
+</body>
+</html>
