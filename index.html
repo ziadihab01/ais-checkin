@@ -228,7 +228,7 @@ async function student() {
   msg('spin', '', 'Checking you’re next to your instructor…', 'Allow location access when your phone asks. This takes a few seconds.');
   let pos;
   try {
-    pos = await getBestPosition(10000, 15);
+    pos = await getBestPosition(15000, 10);   // wait a little longer for a good fix: the limit is only 5 m
   } catch (e) {
     if (e && e.code === 1) {
       return msg('bad', '⌖', 'Location is blocked',
