@@ -147,6 +147,14 @@ table.grid tr.labrow td.nm{background:var(--accent-soft)}
 .small .btn{font-size:16px}
 .pbadge{display:block;width:100%;margin:0 0 12px;border:0;border-radius:12px;padding:12px;background:var(--warn-bg);color:var(--warn);font-weight:700;cursor:pointer;text-align:center}
 .pbadge[hidden]{display:none}
+/* v3.0 */
+.syncline{margin-top:12px;font-size:13px;color:var(--ok);background:var(--ok-bg);border-radius:10px;padding:8px 10px}
+.syncline:empty{display:none}
+.syncline.warn{color:var(--warn);background:var(--warn-bg)}
+.syncline.bad{color:var(--bad);background:var(--bad-bg)}
+.addtag{display:inline-block;font-size:11px;font-weight:700;color:var(--accent);background:var(--accent-soft);border-radius:6px;padding:1px 6px;margin-inline-start:6px;vertical-align:middle}
+table.grid td.nm.added{cursor:pointer}
+.sheet .seg button small{display:block}
 /* projector */
 .proj{min-height:100vh;display:flex;flex-direction:column;padding:20px;gap:16px}
 .ptop{display:flex;align-items:center;justify-content:space-between;gap:12px;flex-wrap:wrap}
@@ -499,7 +507,7 @@ function showWaiting(res) {
 function showPicker() {
   const s = S.session;
   screen(`<div class="card">
-      <div class="chips"><span class="chip accent">Week ${esc(s.week)}</span><span class="chip">${esc(title(s))}</span></div>
+      <div class="chips"><span class="chip accent">Week ${esc(s.week)}</span><span class="chip">${esc(title(s))}</span>${s.by ? `<span class="chip" dir="auto">${esc(s.by)}</span>` : ''}</div>
       <div class="row"><h1>Choose your name</h1><span class="timer" id="timer"></span></div>
       <input id="q" class="search" type="search" placeholder="Search your name or code" autocomplete="off" aria-label="Search your name">
       <div class="list" id="list"></div>
