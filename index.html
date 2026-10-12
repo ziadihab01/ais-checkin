@@ -6,6 +6,8 @@
 <title>AIS Lab Attendance</title>
 <meta name="theme-color" content="#0f3d3a">
 <meta name="robots" content="noindex">
+<link rel="preconnect" href="https://script.google.com" crossorigin>
+<link rel="preconnect" href="https://script.googleusercontent.com" crossorigin>
 <style>
 :root{
   --bg:#f3f5f2; --card:#ffffff; --ink:#132321; --muted:#5b6b67; --line:#dfe5e1; --soft:#eef2ef;
@@ -128,6 +130,23 @@ table.grid tr.labrow td{background:var(--accent-soft);color:var(--accent);font-w
 table.grid tr.labrow td.nm{background:var(--accent-soft)}
 .roll .small{flex:none}
 .name .cd{white-space:nowrap;text-align:left;line-height:1.35}
+/* v2.4 */
+.cap{font-size:13px;font-weight:700;text-transform:uppercase;letter-spacing:.05em;color:var(--muted)}
+.roll button[hidden]{display:none}
+.pend{margin-top:12px;border-color:var(--warn);background:var(--warn-bg)}
+.pend .cap{color:var(--warn)}
+.preq{display:flex;align-items:center;gap:8px;padding:10px 0;border-bottom:1px solid var(--line)}
+.preq:last-child{border-bottom:0}
+.preq .nm{font-weight:650;text-align:right}
+.toast{display:flex;align-items:center;gap:14px}
+.toast .undo{border:0;background:transparent;color:var(--accent-soft);font-weight:750;padding:4px 2px;cursor:pointer;text-decoration:underline}
+.help{margin:12px 0 0;padding:0 0 0 18px;text-align:left}
+.help li{margin:6px 0}
+.linkbtn{border:0;background:transparent;color:var(--accent);font-weight:650;text-decoration:underline;padding:8px 4px;cursor:pointer}
+.codein{font-size:22px;letter-spacing:.08em;text-align:center;direction:ltr}
+.small .btn{font-size:16px}
+.pbadge{display:block;width:100%;margin:0 0 12px;border:0;border-radius:12px;padding:12px;background:var(--warn-bg);color:var(--warn);font-weight:700;cursor:pointer;text-align:center}
+.pbadge[hidden]{display:none}
 /* projector */
 .proj{min-height:100vh;display:flex;flex-direction:column;padding:20px;gap:16px}
 .ptop{display:flex;align-items:center;justify-content:space-between;gap:12px;flex-wrap:wrap}
@@ -200,7 +219,7 @@ function deviceId() {
 }
 
 /* GPS: follow the phone's position and keep the most accurate fix seen so far. */
-function gpsWatch(onUpdate) {
+function gpsWatch(onUpdate, fresh) {
   const w = { best: null, error: null, waiters: [], id: null };
   w.notify = () => w.waiters.slice().forEach(f => f());
   w.stop = () => { if (w.id != null) navigator.geolocation.clearWatch(w.id); w.id = null; };
@@ -209,7 +228,8 @@ function gpsWatch(onUpdate) {
     if (!w.best || p.coords.accuracy <= w.best.coords.accuracy) w.best = p;
     if (onUpdate) onUpdate(w.best);
     w.notify();
-  }, err => { if (err.code === 1) { w.error = err; w.notify(); } }, { enableHighAccuracy: true, maximumAge: 0, timeout: 60000 });
+  }, err => { if (err.code === 1) { w.error = err; w.notify(); } },
+  { enableHighAccuracy: true, maximumAge: fresh ? 0 : 15000, timeout: 60000 });
   return w;
 }
 /* Resolves when a fix within goodM arrives, or settleMs after the first fix with the best so far.
@@ -257,66 +277,223 @@ function msg(kind, icon, head, text, actions) {
 const retryBtn = () => `<button class="btn block" onclick="location.reload()">Try again</button>`;
 
 /* ============================== STUDENT ============================== */
-const S = { ticket: null, session: null, students: [], expiresAt: 0, timer: null, busy: false };
+/* Which browser opened the page. Apps that open links inside themselves (QR-scanner apps,
+   WhatsApp, Facebook, Instagram, …) often can't share location at all — the most common
+   reason a student next to the instructor sees “location blocked”. */
+const UA = navigator.userAgent || '';
+const IS_IOS = /iPhone|iPad|iPod/i.test(UA) || (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1);
+const IS_ANDROID = !IS_IOS && /Android/i.test(UA);
+const IN_APP = /; wv\)|FBAN|FBAV|FB_IAB|Instagram|Line\/|MicroMessenger|Snapchat|musical_ly|TikTok|BytedanceWebview|Twitter|WhatsApp|Telegram|GSA\//i.test(UA)
+  || (IS_IOS && !/Safari\//i.test(UA) && !/CriOS|FxiOS|EdgiOS/i.test(UA));
+const IS_CHROME = IS_ANDROID && !IN_APP && /Chrome\/\d/.test(UA) && !/SamsungBrowser|OPR\/|EdgA|YaBrowser|MiuiBrowser|HeyTap|Firefox|UCBrowser|Vivaldi/i.test(UA);
+const chromeIntent = () => 'intent://' + location.host + location.pathname + location.search +
+  '#Intent;scheme=https;package=com.android.chrome;S.browser_fallback_url=' + encodeURIComponent(location.href) + ';end';
+
+const S = { ticket: null, session: null, students: [], expiresAt: 0, timer: null, busy: false, gps: null, reason: '', slowT: null };
+
+/* One retry on a dropped connection — mobile data often loses the first request. */
+async function apiRetry(action, data) {
+  try { return await api(action, data, 12000); }
+  catch (e) { await new Promise(r => setTimeout(r, 700)); return api(action, data, 15000); }
+}
 
 async function student() {
   const sid = TOKEN.split('.')[0];
   const done = readJSON(store.get('ais_done_' + sid));
   if (done) return showDone(done, true);
   if (!API_URL) return msg('warn', '⟳', 'Scan the code again', 'This link is incomplete. Scan the QR code your instructor is showing.');
-  msg('spin', '', 'Checking you’re next to your instructor…', 'Allow location access when your phone asks.<br><span id="gpsAcc"></span>');
-  const gps = gpsWatch(p => { const el = document.getElementById('gpsAcc'); if (el) el.textContent = `GPS accuracy ±${Math.round(p.coords.accuracy)} m`; });
+  attempt(false);
+}
+
+function startGps(fresh) {
+  if (S.gps) S.gps.stop();
+  S.gps = gpsWatch(p => { const el = document.getElementById('gpsAcc'); if (el) el.textContent = `GPS accuracy ±${Math.round(p.coords.accuracy)} m`; }, fresh);
+}
+
+/* Links offered whenever location is slow or fails. */
+function helpLinks(withChrome) {
+  return `<div id="helpLinks" style="margin-top:14px">
+    ${withChrome && IS_ANDROID && !IS_CHROME ? `<a class="btn block" href="${esc(chromeIntent())}" style="margin-bottom:8px">Open in Chrome</a>` : ''}
+    <button class="linkbtn" onclick="showRequest()">My location doesn’t work — ask my instructor</button></div>`;
+}
+
+function locating(first, askPrompt) {
+  clearTimeout(S.slowT);
+  screen(`<div class="card center" role="status" aria-live="polite"><div class="spinner"></div>
+    <h1>${first ? 'Checking you’re next to your instructor…' : 'Getting your location…'}</h1>
+    <p class="muted">${askPrompt ? '<b>Tap “Allow”</b> when your phone asks for your location.<br>' : ''}<span id="gpsAcc"></span></p>
+    <div id="slow" hidden><p class="muted small">Taking long? Make sure Location is on.</p>${helpLinks(true)}</div></div>`);
+  S.slowT = setTimeout(() => { const el = document.getElementById('slow'); if (el) el.hidden = false; }, 7000);
+}
+
+async function attempt(fresh) {
+  let perm = null;
+  try { if (navigator.permissions && navigator.permissions.query) perm = (await navigator.permissions.query({ name: 'geolocation' })).state; } catch (e) { perm = null; }
+  if (perm === 'denied') return locationBlocked();
+  if (fresh || !S.gps || S.gps.error) startGps(fresh);
+  locating(!fresh, perm === 'prompt');
   let pos;
   try {
-    pos = await bestFix(gps, 25000, 3000, 10);   // go as soon as the reading is decent; improve later only if needed
+    pos = await bestFix(S.gps, 25000, 1500, 25);   // go as soon as the reading is decent; improve later only if needed
   } catch (e) {
-    gps.stop();
-    if (e && e.code === 1) {
-      return msg('bad', '⌖', 'Location is blocked',
-        'Check-in needs your location to confirm you are in the lab.<br><br><b>iPhone:</b> Settings ▸ Privacy ▸ Location Services ▸ Safari Websites ▸ While Using, and turn on Precise Location.<br><b>Android:</b> tap the lock icon by the address ▸ Permissions ▸ Location ▸ Allow, and make sure “Use precise location” is on.',
-        retryBtn());
-    }
-    if (e && e.code === 'unsupported') return msg('bad', '⌖', 'Location not available', 'This browser can’t share location. Open the link in Chrome or Safari.');
-    return msg('warn', '⌖', 'Couldn’t get your location', 'Turn on location (GPS) on your phone, then try again.', retryBtn());
+    clearTimeout(S.slowT);
+    if (e && e.code === 1) return locationBlocked();
+    if (e && e.code === 'unsupported') return noLocation('unsupported');
+    return noLocation('nofix');
   }
+  clearTimeout(S.slowT);
   msg('spin', '', 'Opening the list…', '');
-  const open = p => api('sOpen', { token: TOKEN, device: deviceId(), lat: p.coords.latitude, lng: p.coords.longitude, acc: p.coords.accuracy });
+  const open = p => apiRetry('sOpen', { token: TOKEN, device: deviceId(), lat: p.coords.latitude, lng: p.coords.longitude, acc: p.coords.accuracy });
   let res;
   try {
     res = await open(pos);
+    // Attendance just starting (or a new code on screen)? The instructor's start may still be landing.
+    for (let i = 0; i < 3 && !res.ok && (res.code === 'closed' || (res.code === 'expired' && res.other)); i++) {
+      await new Promise(r => setTimeout(r, 2000));
+      res = await open(pos);
+    }
     // Too far or too rough? GPS often sharpens within seconds, so retry quietly with a better reading.
     const worthRetry = r => !r.ok && (r.code === 'low_accuracy' || (r.code === 'too_far' && r.distance - r.allowed <= Math.max(15, pos.coords.accuracy * 2)));
     for (let i = 0; i < 3 && worthRetry(res); i++) {
-      msg('spin', '', 'Getting a more precise location…', `GPS accuracy ±${Math.round(pos.coords.accuracy)} m — hold still a moment.`);
-      const better = await betterFix(gps, pos.coords.accuracy, 7000);
+      screen(`<div class="card center" role="status" aria-live="polite"><div class="spinner"></div><h1>Getting a more precise location…</h1>
+        <p class="muted">GPS accuracy ±${Math.round(pos.coords.accuracy)} m — hold still a moment.</p>${helpLinks(false)}</div>`);
+      const better = await betterFix(S.gps, pos.coords.accuracy, 7000);
       if (!better) break;
       pos = better;
       res = await open(pos);
     }
   } catch (e) {
-    gps.stop();
-    return msg('warn', '↻', 'No connection', 'Couldn’t reach the attendance service. Check your mobile data and try again.', retryBtn());
+    return msg('warn', '↻', 'No connection', 'Couldn’t reach the attendance service. Check your mobile data and try again.',
+      `<button class="btn block" onclick="attempt(false)">Try again</button>`);
   }
-  gps.stop();
   if (!res.ok) return studentFail(res);
+  if (S.gps) S.gps.stop();
   S.ticket = res.ticket; S.session = res.session; S.students = res.students;
   S.expiresAt = Date.now() + res.expiresIn * 1000;
   showPicker();
 }
 
+function tryAgainBtn() { return `<button class="btn block" onclick="attempt(true)">Try again</button>`; }
+
+function locationBlocked() {
+  S.reason = 'blocked';
+  if (S.gps) S.gps.stop();
+  let help;
+  if (IN_APP && IS_ANDROID) {
+    help = `This page opened inside another app, and that app doesn’t share your location.
+      <a class="btn block" href="${esc(chromeIntent())}" style="margin-top:14px">Open in Chrome</a>
+      <button class="btn ghost block" onclick="copyLink()" style="margin-top:8px">Copy link (paste it in Chrome)</button>
+      <p class="small" style="margin-top:12px">Next time, scan with your phone’s Camera or Google Lens.</p>`;
+  } else if (IN_APP && IS_IOS) {
+    help = `This page opened inside another app, and that app doesn’t share your location.
+      <ol class="help"><li>Tap <b>⋯</b> or the share icon ▸ <b>Open in Safari</b> (or copy the link into Safari).</li>
+      <li>Next time, scan with the iPhone Camera app.</li></ol>
+      <button class="btn ghost block" onclick="copyLink()" style="margin-top:8px">Copy link</button>`;
+  } else if (IS_IOS) {
+    help = `<ol class="help"><li>Open <b>Settings ▸ Privacy &amp; Security ▸ Location Services</b> and turn it <b>On</b>.</li>
+      <li>In the same list tap <b>Safari Websites</b> ▸ <b>While Using the App</b>, and turn on <b>Precise Location</b>.</li>
+      <li>Back in Safari, tap <b>aA</b> ▸ <b>Website Settings</b> ▸ <b>Location</b> ▸ <b>Allow</b>.</li>
+      <li>Come back here and tap <b>Try again</b>.</li></ol>`;
+  } else {
+    help = `<ol class="help"><li>Swipe down from the top of your screen and make sure <b>Location</b> is on.</li>
+      <li>Tap the icon at the left of the web address ▸ <b>Permissions</b> ▸ <b>Location</b> ▸ <b>Allow</b> (or <b>Reset permissions</b>).</li>
+      <li>Still blocked? Phone <b>Settings ▸ Apps ▸ ${IS_CHROME ? 'Chrome' : 'your browser'} ▸ Permissions ▸ Location ▸ Allow</b>, with <b>Use precise location</b> on.</li>
+      <li>Come back here and tap <b>Try again</b>.</li></ol>
+      ${IS_ANDROID && !IS_CHROME ? `<a class="btn ghost block" href="${esc(chromeIntent())}" style="margin-top:8px">Open in Chrome instead</a>` : ''}`;
+  }
+  screen(`<div class="card center" role="alert">
+    <div class="icon bad">⌖</div><h1>Location is blocked</h1>
+    <p class="muted">Check-in needs your location to confirm you’re in the lab.</p>
+    <div class="muted small" style="text-align:left">${help}</div>
+    <div style="margin-top:16px">${tryAgainBtn()}</div>
+    <button class="linkbtn" style="margin-top:8px" onclick="showRequest()">Still not working? Ask my instructor to check me in</button></div>`);
+}
+
+function noLocation(kind) {
+  S.reason = kind === 'unsupported' ? 'unsupported' : 'nofix';
+  if (S.gps) S.gps.stop();
+  const text = kind === 'unsupported'
+    ? 'This browser can’t share your location. Open the link in Chrome (Android) or Safari (iPhone).'
+    : 'Turn on <b>Location</b> on your phone (swipe down from the top of the screen), then try again — standing near a window helps.';
+  screen(`<div class="card center" role="alert">
+    <div class="icon warn">⌖</div><h1>Couldn’t get your location</h1>
+    <p class="muted">${text}</p>
+    ${(IN_APP || kind === 'unsupported') && IS_ANDROID && !IS_CHROME ? `<a class="btn block" href="${esc(chromeIntent())}" style="margin-bottom:8px">Open in Chrome</a>` : ''}
+    ${tryAgainBtn()}
+    <button class="linkbtn" style="margin-top:8px" onclick="showRequest()">Ask my instructor to check me in instead</button></div>`);
+}
+
+async function copyLink() {
+  try { await navigator.clipboard.writeText(location.href); toast('Link copied. Open Chrome or Safari and paste it in the address bar.', true); }
+  catch (e) { prompt('Copy this link, then paste it in Chrome or Safari:', location.href); }
+}
+
 function studentFail(res) {
   clearInterval(S.timer);
+  if (S.gps && res.code !== 'too_far' && res.code !== 'low_accuracy') S.gps.stop();
+  const ask = `<button class="linkbtn" style="margin-top:8px" onclick="showRequest()">I’m in the lab — ask my instructor to check me in</button>`;
   switch (res.code) {
     case 'already': return showDone(saveDone(res.sessionId, res.name, res.session), true);
     case 'too_far':
-      return msg('bad', '⌖', 'You’re not next to your instructor',
-        `You are about <b>${esc(res.distance)} m</b> away; check-in works within <b>${esc(res.allowed)} m</b>.<br><br>Stand closer to your instructor, wait a few seconds for GPS to settle, and try again.`, retryBtn());
-    case 'low_accuracy': return msg('warn', '⌖', 'Location too rough', esc(res.message), retryBtn());
+      S.reason = 'far:' + res.distance;
+      return msg('bad', '⌖', 'Your phone says you’re too far',
+        `Your phone puts you about <b>${esc(res.distance)} m</b> from your instructor; here it has to be within <b>${esc(res.allowed)} m</b> (GPS error included).<br><br>Move closer — or near a window — wait a few seconds, and try again.`,
+        tryAgainBtn() + ask);
+    case 'low_accuracy':
+      S.reason = 'rough:' + (res.accuracy || '');
+      return msg('warn', '⌖', 'Location too rough', esc(res.message), tryAgainBtn() + ask);
     case 'expired': case 'bad_qr': case 'bad_ticket': return msg('warn', '⟳', 'Scan the code again', esc(res.message));
     case 'ticket_expired': return msg('warn', '⏱', 'Time ran out', esc(res.message));
     case 'closed': return msg('info', '✕', 'Attendance is closed', esc(res.message));
-    default: return msg('bad', '!', 'Something went wrong', esc(res.message || 'Please try again.'), retryBtn());
+    default: return msg('bad', '!', 'Something went wrong', esc(res.message || 'Please try again.'), tryAgainBtn());
   }
+}
+
+/* Fallback: the student types their code and the instructor approves it on the app. */
+function showRequest() {
+  clearTimeout(S.slowT);
+  if (S.gps) S.gps.stop();
+  const reason = S.reason || (IN_APP ? 'blocked' : 'nofix');
+  screen(`<div class="card">
+      <h1>Ask your instructor</h1>
+      <p class="muted">Type your student code. Your instructor sees your name on their phone and checks you in.</p>
+      <form id="reqForm" autocomplete="off">
+        <label class="lbl" for="code">Student code</label>
+        <input id="code" class="field codein" inputmode="numeric" pattern="[0-9 ]*" maxlength="14" placeholder="2507…" required>
+        <div id="reqErr"></div>
+        <button class="btn block" id="send" style="margin-top:14px">Send to my instructor</button>
+      </form>
+      <button class="linkbtn" style="margin-top:8px" onclick="attempt(true)">Try my location again</button>
+    </div>`);
+  const input = document.getElementById('code');
+  input.focus();
+  document.getElementById('reqForm').onsubmit = async ev => {
+    ev.preventDefault();
+    const code = input.value.replace(/\D/g, ''), btn = document.getElementById('send'), err = document.getElementById('reqErr');
+    if (code.length < 4) { err.innerHTML = '<div class="err">Type your full student code.</div>'; return; }
+    btn.disabled = true; btn.textContent = 'Sending…'; err.innerHTML = '';
+    let res;
+    try { res = await apiRetry('sRequest', { token: TOKEN, device: deviceId(), code, reason }); }
+    catch (e) { res = { ok: false, code: 'net', message: 'No connection. Check your mobile data and try again.' }; }
+    btn.disabled = false; btn.textContent = 'Send to my instructor';
+    if (res.ok) return showWaiting(res);
+    if (res.code === 'already') return showDone(saveDone(res.sessionId, res.name, res.session), true);
+    if (res.code === 'closed' || res.code === 'expired' || res.code === 'bad_qr') return studentFail(res);
+    err.innerHTML = `<div class="err">${esc(res.message)}</div>`;
+  };
+}
+
+function showWaiting(res) {
+  store.set('ais_req_' + res.sessionId, JSON.stringify({ name: res.name, code: res.code, at: Date.now() }));
+  const s = res.session;
+  screen(`<div class="card center">
+      <div class="icon info">⏳</div>
+      <h1>Sent to your instructor</h1>
+      <div class="bigname">${esc(res.name)}</div>
+      <p class="muted small">Code ${esc(res.code)} · Lab ${esc(res.lab)}${s ? ` · Week ${esc(s.week)} · ${esc(title(s))}` : ''}</p>
+      <div class="note">Your instructor checks you in from their phone. You can close this page.</div>
+      <button class="linkbtn" style="margin-top:8px" onclick="attempt(true)">Try my location again</button>
+    </div>`);
 }
 
 function showPicker() {
@@ -372,7 +549,7 @@ function confirmName(code) {
     S.busy = true;
     const go = el.querySelector('#go'); go.disabled = true; go.textContent = 'Checking in…';
     let res;
-    try { res = await api('sCheckIn', { ticket: S.ticket, device: deviceId(), code }); }
+    try { res = await apiRetry('sCheckIn', { ticket: S.ticket, device: deviceId(), code }); }
     catch (e) { res = { ok: false, code: 'net' }; }
     S.busy = false;
     if (res.ok) { close(); clearInterval(S.timer); return showDone(saveDone(res.sessionId, res.name, res.session), false); }
@@ -386,10 +563,10 @@ function confirmName(code) {
   };
 }
 
-function toast(text) {
+function toast(text, info) {
   const t = document.createElement('div');
   t.className = 'sheet'; t.style.alignItems = 'flex-start';
-  t.innerHTML = `<div class="card"><div class="err" style="margin:0">${esc(text)}</div><div class="btns"><button class="btn ghost">OK</button></div></div>`;
+  t.innerHTML = `<div class="card"><div class="${info ? 'okmsg' : 'err'}" style="margin:0">${esc(text)}</div><div class="btns"><button class="btn ghost">OK</button></div></div>`;
   t.querySelector('button').onclick = () => t.remove();
   document.body.appendChild(t);
 }
